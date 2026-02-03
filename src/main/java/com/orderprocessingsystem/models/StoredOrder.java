@@ -9,15 +9,15 @@ import lombok.Setter;
 @Builder
 public class StoredOrder {
   @Getter private final Order order;
-  @Setter @Getter private long storedAtMicros;
-  @Setter @Getter private StorageType storageType;
+  @Setter @Getter private volatile long storedAtMicros;
+  @Setter @Getter private volatile StorageType storageType;
 
   public boolean isExpired(long nowMicros) {
-    return getEffectiveAgeSeconds(nowMicros) > order.getFreshnessSeconds();
+    return getEffectiveAgeSeconds(nowMicros) > order.getFreshness();
   }
 
   public int remainingFreshness(long nowMicros) {
-    return order.getFreshnessSeconds() - getEffectiveAgeSeconds(nowMicros);
+    return order.getFreshness() - getEffectiveAgeSeconds(nowMicros);
   }
 
   private boolean isIdealStorage() {

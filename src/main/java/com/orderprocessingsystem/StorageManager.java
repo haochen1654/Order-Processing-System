@@ -1,10 +1,12 @@
 package com.orderprocessingsystem;
 
+import static com.orderprocessingsystem.utils.Utils.buildAction;
+import static com.orderprocessingsystem.utils.Utils.currentTimestampMicros;
+
 import com.orderprocessingsystem.constants.Constants;
 import com.orderprocessingsystem.constants.Constants.ActionType;
 import com.orderprocessingsystem.constants.Constants.StorageType;
 import com.orderprocessingsystem.constants.Constants.Temperature;
-import com.orderprocessingsystem.ledger.Action;
 import com.orderprocessingsystem.ledger.ActionLedger;
 import com.orderprocessingsystem.models.StoredOrder;
 import com.orderprocessingsystem.storage.Cooler;
@@ -14,7 +16,6 @@ import com.orderprocessingsystem.storage.Storage;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
-import static com.orderprocessingsystem.utils.Utils.currentTimestampMicros;
 
 public class StorageManager {
   private final Heater heater = new Heater();
@@ -25,48 +26,85 @@ public class StorageManager {
   private final ReentrantLock coolerLock = new ReentrantLock();
   private final ReentrantLock shelfLock = new ReentrantLock();
 
-public void place(StoredOrder storedOrder, ActionLedger ledger) throws Exception {
+  public void place(StoredOrder storedOrder, ActionLedger ledger)
+      throws Exception {
     // Try placing the order in ideal storage first
     if (placeOrderToIdealStorage(storedOrder, ledger)) {
-        return;
+      return;
     }
 
     boolean acquired = false;
     try {
-        acquired = shelfLock.tryLock(Constants.LOCK_TIMEOUT, TimeUnit.MILLISECONDS);
-        if (!acquired) return;
+      acquired =
+          shelfLock.tryLock(Constants.LOCK_TIMEOUT, TimeUnit.MILLISECONDS);
+      if (!acquired)
+        return;
 
-        if (shelf.hasRoom()) {
-            addToShelf(storedOrder, ledger);
-            return;
-        }
-
-        // Try moving an order from shelf to ideal storage to free up space
-        if (tryMoveFromShelf(ledger) && shelf.hasRoom()) {
-            addToShelf(storedOrder, ledger);
-            return;
-        }
-
-        // If still no room, discard the worst order
-        StoredOrder victim = shelf.discardWorst();
-        if (victim != null) {
-            ledger.record(buildAction(victim, StorageType.SHELF, ActionType.DISCARD));
-        }
+      if (shelf.hasRoom()) {
         addToShelf(storedOrder, ledger);
+        return;
+      }
+
+      // Try moving an order from shelf to ideal storage to free up space
+      if (tryMoveFromShelf(ledger) && shelf.hasRoom()) {
+        addToShelf(storedOrder, ledger);
+        return;
+      }
+
+      // If still no room, discard the worst order
+      StoredOrder victim = shelf.discardWorst();
+      if (victim != null) {
+        ledger.record(
+            buildAction(victim, StorageType.SHELF, ActionType.DISCARD));
+      }
+      addToShelf(storedOrder, ledger);
 
     } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
+      Thread.currentThread().interrupt();
     } finally {
-        if (acquired) {
-            shelfLock.unlock();
-        }
+      if (acquired) {
+        shelfLock.unlock();
+      }
     }
-}
+  }
 
-private void addToShelf(StoredOrder order, ActionLedger ledger) throws Exception {
+  public void remove(StoredOrder storedOrder) throws Exception {
+    if (storedOrder == null) {
+      return;
+    }
+    try {
+      switch (storedOrder.getStorageType()) {
+      case SHELF:
+        removeOrder(storedOrder, /* storage= */ shelf, shelfLock);
+      case HEATER:
+        removeOrder(storedOrder, /* storage= */ heater, heaterLock);
+      case COOLER:
+        removeOrder(storedOrder, /* storage= */ cooler, coolerLock);
+      default:
+        return;
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return;
+    }
+  }
+
+  private boolean removeOrder(StoredOrder storedOrder, Storage storage,
+                              ReentrantLock lock) throws InterruptedException {
+    lock.lock(); // GUARANTEED acquisition (unless thread is interrupted)
+    try {
+      storage.remove(storedOrder.getOrder().getId());
+      return false;
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  private void addToShelf(StoredOrder order, ActionLedger ledger)
+      throws Exception {
     shelf.add(order);
     ledger.record(buildAction(order, StorageType.SHELF, ActionType.PLACE));
-}
+  }
 
   private boolean placeOrderToIdealStorage(StoredOrder storedOrder,
                                            ActionLedger ledger)
@@ -114,16 +152,6 @@ private void addToShelf(StoredOrder order, ActionLedger ledger) throws Exception
     }
   }
 
-  private Action buildAction(StoredOrder storedOrder, StorageType target,
-                             ActionType action) {
-    return Action.builder()
-        .timestamp(currentTimestampMicros())
-        .action(action)
-        .id(storedOrder.getOrder().getId())
-        .target(target)
-        .build();
-  }
-
   private boolean tryMoveFromShelf(ActionLedger ledger) throws Exception {
     return tryMoveToStorage(coolerLock, cooler, Temperature.COLD,
                             StorageType.COOLER, ledger) ||
@@ -143,10 +171,10 @@ private void addToShelf(StoredOrder order, ActionLedger ledger) throws Exception
           StoredOrder candidate = candidateOpt.get();
           // Remove from shelf
           shelf.remove(candidate.getOrder().getId());
-          // Add to ideal storage
+          // Move to ideal storage
           long currentTimeMicros = currentTimestampMicros();
           candidate.setStoredAtMicros(currentTimeMicros);
-          candidate.getOrder().setFreshnessSeconds(
+          candidate.getOrder().setFreshness(
               candidate.remainingFreshness(currentTimeMicros));
           storage.add(candidate);
           ledger.record(buildAction(candidate, target, ActionType.MOVE));

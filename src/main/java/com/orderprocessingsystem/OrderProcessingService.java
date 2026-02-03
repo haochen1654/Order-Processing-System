@@ -1,7 +1,9 @@
 package com.orderprocessingsystem;
 
+import static com.orderprocessingsystem.utils.Utils.buildAction;
 import static com.orderprocessingsystem.utils.Utils.currentTimestampMicros;
 
+import com.orderprocessingsystem.constants.Constants.ActionType;
 import com.orderprocessingsystem.ledger.Action;
 import com.orderprocessingsystem.ledger.ActionLedger;
 import com.orderprocessingsystem.models.Order;
@@ -12,30 +14,36 @@ import java.util.concurrent.ConcurrentMap;
 public class OrderProcessingService {
   private final StorageManager storageManager = new StorageManager();
   private final ActionLedger ledger = new ActionLedger();
-  private final ConcurrentMap<String, StoredOrder> index =
+  private final ConcurrentMap<String, StoredOrder> indexOfOrder =
       new ConcurrentHashMap<>();
 
   public void placeOrder(Order order) throws Exception {
     StoredOrder storedOrder = StoredOrder.builder()
-                         .order(order)
-                         .storedAtMicros(currentTimestampMicros())
-                         .build();
+                                  .order(order)
+                                  .storedAtMicros(currentTimestampMicros())
+                                  .build();
 
     storageManager.place(storedOrder, ledger);
-    index.put(order.getId(), storedOrder);
+    indexOfOrder.put(order.getId(), storedOrder);
   }
 
-  public void pickupOrder(String orderId) {
-    StoredOrder so = index.remove(orderId);
-    if (so == null)
+  public void pickupOrder(String orderId) throws Exception {
+    StoredOrder storedOrder = indexOfOrder.remove(orderId);
+    if (storedOrder == null)
       return;
 
-    if (so.isExpired(TimeUtil.nowMicros())) {
-      storageManager.remove(so);
-      ledger.record(Action.discard(so));
-    } else {
-      storageManager.remove(so);
-      ledger.record(Action.pickup(so));
+    if (storedOrder.isExpired(currentTimestampMicros())) {
+      storageManager.remove(storedOrder);
+      ledger.record(buildAction(storedOrder,
+                                /* target= */ storedOrder.getStorageType(),
+                                /* action= */ ActionType.DISCARD));
+      return;
     }
+
+    storageManager.remove(storedOrder);
+    ledger.record(buildAction(storedOrder,
+                                /* target= */ storedOrder.getStorageType(),
+                                /* action= */ ActionType.PICKUP));
   }
+
 }

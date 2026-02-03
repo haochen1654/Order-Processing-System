@@ -8,9 +8,22 @@ import lombok.Setter;
 @Getter
 @Builder
 public class Order {
-  private final String id;
-  private final String name;
-  private final Temperature temp;
-  private final int price;
-  @Setter private int freshnessSeconds;
+  private String id;
+  private String name;
+  private Temperature temp;
+  private int price;
+  @Setter private volatile int freshness;
+
+  // Default constructor needed by Jackson
+  public Order() {}
+
+  // Optional convenience constructor
+  public Order(String id, String name, Temperature temp, int price,
+               int freshness) {
+    this.id = id;
+    this.name = name;
+    this.temp = temp;
+    this.price = price;
+    this.freshness = freshness;
+  }
 }
