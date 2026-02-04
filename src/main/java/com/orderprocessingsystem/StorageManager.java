@@ -119,8 +119,7 @@ public class StorageManager {
       return tryPlace(storedOrder, cooler, coolerLock, StorageType.COOLER,
                       ledger);
     case ROOM:
-      return tryPlace(storedOrder, shelf, shelfLock, StorageType.COOLER,
-                      ledger);
+      return tryPlace(storedOrder, shelf, shelfLock, StorageType.SHELF, ledger);
     default:
       return false;
     }

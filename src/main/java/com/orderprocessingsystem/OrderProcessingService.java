@@ -4,8 +4,9 @@ import static com.orderprocessingsystem.utils.Utils.buildAction;
 import static com.orderprocessingsystem.utils.Utils.currentTimestampMicros;
 
 import com.orderprocessingsystem.constants.Constants.ActionType;
-import com.orderprocessingsystem.ledger.Action;
 import com.orderprocessingsystem.ledger.ActionLedger;
+import com.orderprocessingsystem.ledger.ActionLog;
+import com.orderprocessingsystem.models.Options;
 import com.orderprocessingsystem.models.Order;
 import com.orderprocessingsystem.models.StoredOrder;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,8 +43,14 @@ public class OrderProcessingService {
 
     storageManager.remove(storedOrder);
     ledger.record(buildAction(storedOrder,
-                                /* target= */ storedOrder.getStorageType(),
-                                /* action= */ ActionType.PICKUP));
+                              /* target= */ storedOrder.getStorageType(),
+                              /* action= */ ActionType.PICKUP));
   }
 
+  public ActionLog generateLogReport(Options options) {
+    return ActionLog.builder()
+        .options(options)
+        .actions(ledger.snapshot())
+        .build();
+  }
 }

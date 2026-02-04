@@ -1,34 +1,40 @@
 package com.orderprocessingsystem;
 
-import static com.orderprocessingsystem.constants.Constants.MAX_PICKUP_OFFSET_MICRO;
-import static com.orderprocessingsystem.constants.Constants.MIN_PICKUP_OFFSET_MICRO;
-import static com.orderprocessingsystem.constants.Constants.RATE_MICRO;
-
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.orderprocessingsystem.ledger.ActionLog;
+import com.orderprocessingsystem.models.Options;
 import com.orderprocessingsystem.models.Order;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
+
 public class Main {
   public static void main(String[] args) throws IOException {
-    if (args.length == 0) {
-      throw new IllegalArgumentException("Missing JSON config argument");
+    if (args.length < 4) {
+      throw new IllegalArgumentException("Missing arguments");
     }
 
+    int rateMicro = Integer.parseInt(args[0]);
+    int minPickupOffsetMicro = Integer.parseInt(args[1]);
+    int maxPickupOffsetMicro = Integer.parseInt(args[2]);
+    // Read JSON input from file or direct string
     String jsonInput;
-    if (args[0].endsWith(".json")) {
-      jsonInput = new String(Files.readAllBytes(Paths.get(args[0])));
+    if (!args[3].isEmpty() && args[3].endsWith(".json")) {
+      jsonInput = new String(Files.readAllBytes(Paths.get(args[3])));
     } else {
-      jsonInput = args[0];
+      jsonInput = args[3];
     }
 
     // Parse orders from JSON input
@@ -46,23 +52,69 @@ public class Main {
     ScheduledExecutorService pickupper = Executors.newScheduledThreadPool(4);
 
     OrderProcessingService service = new OrderProcessingService();
-    for (Order order : orders) {
+    // Use CountDownLatch to wait for all orders to be processed if needed
+    CountDownLatch latch = new CountDownLatch(orders.size());
+    for (int i = 0; i < orders.size(); i++) {
+      Order order = orders.get(i);
+      // Calculate a unique delay for each order to create a staggered rate
+      long staggeredDelay = (long)(i + 1) * rateMicro;
+
       placer.schedule(() -> {
         try {
           service.placeOrder(order);
+
+          // Now schedule the pickup relative to placement time
+          int pickupDelay = ThreadLocalRandom.current().nextInt(
+              minPickupOffsetMicro, maxPickupOffsetMicro);
+
+          pickupper.schedule(() -> {
+            try {
+              service.pickupOrder(order.getId());
+            } catch (Exception e) {
+              e.printStackTrace();
+            } finally {
+              // Countdown the latch when pickup is done
+              latch.countDown();
+            }
+          }, pickupDelay, TimeUnit.MICROSECONDS);
+
         } catch (Exception e) {
-          throw new RuntimeException(e);
+          e.printStackTrace();
+          // If placement fails, still countdown the latch otherwise it will
+          // hang
+          latch.countDown();
         }
-        int delay = ThreadLocalRandom.current().nextInt(
-            MIN_PICKUP_OFFSET_MICRO, MAX_PICKUP_OFFSET_MICRO);
-        pickupper.schedule(() -> {
-          try {
-            service.pickupOrder(order.getId());
-          } catch (Exception e) {
-            throw new RuntimeException(e);
-          }
-        }, delay, TimeUnit.MICROSECONDS);
-      }, RATE_MICRO, TimeUnit.MICROSECONDS);
+      }, staggeredDelay, TimeUnit.MICROSECONDS);
     }
+
+    // Block the main thread here until the count reaches zero
+    System.out.println("Waiting for all orders to complete...");
+
+    try {
+      latch.await();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+
+    // This runs ONLY after all latch.countDown() calls are finished
+    System.out.println("All orders processed. Generating report...");
+    ActionLog actionLog =
+        service.generateLogReport(Options.builder()
+                                      .rate(rateMicro)
+                                      .min(minPickupOffsetMicro)
+                                      .max(maxPickupOffsetMicro)
+                                      .build());
+
+    // Make the JSON look "pretty" (readable)
+    mapper.enable(SerializationFeature.INDENT_OUTPUT);
+    try {
+      mapper.writeValue(new File("data.json"), actionLog);
+      System.out.println("JSON successfully written to data.json");
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+    // Clean up
+    placer.shutdown();
+    pickupper.shutdown();
   }
 }

@@ -44,7 +44,4 @@ public class Constants {
   }
 
   public static final int LOCK_TIMEOUT = 500;                // milliseconds
-  public static final int RATE_MICRO = 500000;               // 0.5 seconds
-  public static final int MIN_PICKUP_OFFSET_MICRO = 4000000; // 4 seconds
-  public static final int MAX_PICKUP_OFFSET_MICRO = 8000000; // 8 seconds
 }

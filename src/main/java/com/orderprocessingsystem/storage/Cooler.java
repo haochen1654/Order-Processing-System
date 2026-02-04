@@ -10,7 +10,9 @@ public class Cooler implements Storage {
   private final Map<String, StoredOrder> orders = new HashMap<>();
 
   @Override
-  public boolean hasRoom() { return orders.size() < CAPACITY; }
+  public boolean hasRoom() {
+    return orders.size() < CAPACITY;
+  }
 
   @Override
   public void add(StoredOrder storedOrder) {
@@ -19,5 +21,7 @@ public class Cooler implements Storage {
   }
 
   @Override
-  public StoredOrder remove(String orderId) { return orders.remove(orderId); }
+  public StoredOrder remove(String orderId) {
+    return orders.remove(orderId);
+  }
 }
