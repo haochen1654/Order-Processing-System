@@ -16,7 +16,7 @@ A high-performance Java simulation designed to model a kitchen's order placement
 ## Installation & Setup
 1. Clone the repository:
     ```bash
-   git clone [https://github.com/haochen1654/Order-Processing-System.git](https://github.com/haochen1654/Order-Processing-System.git)
+   git clone https://github.com/haochen1654/Order-Processing-System.git
    cd Order-Processing-System
 
 2. Build the project:
